@@ -3,23 +3,17 @@ import requests
 import pandas as pd
 import ta
 import plotly.graph_objects as go
-import numpy as np
 
-# ===== Configurazione Pagina =====
 st.set_page_config(page_title="Crypto Analyzer PRO", layout="wide")
 
-# ===== Sidebar Settings =====
-st.sidebar.title("Impostazioni")
 crypto_list = ["BTC-USDT", "ETH-USDT", "SOL-USDT", "AVAX-USDT", "XRP-USDT"]
 selected_cryptos = st.sidebar.multiselect("Seleziona le coppie", crypto_list, default=["BTC-USDT"])
 interval = st.sidebar.selectbox("Intervallo", ["1m","5m","15m","1h","4h","1d"], index=3)
-limit = st.sidebar.slider("Numero di candele", 100, 1000, 300)
+limit = st.sidebar.slider("Numero di candele", 50, 1000, 300)
 dark_mode = st.sidebar.checkbox("Modalità Scura", value=True)
 
-# ===== Tema =====
 theme = "plotly_dark" if dark_mode else "plotly_white"
 
-# ===== Funzione dati OKX =====
 def get_okx_data(symbol, interval, limit):
     url = f"https://www.okx.com/api/v5/market/candles?instId={symbol}&bar={interval}&limit={limit}"
     response = requests.get(url)
@@ -27,11 +21,11 @@ def get_okx_data(symbol, interval, limit):
     df = pd.DataFrame(data, columns=["ts","o","h","l","c","vol","volCcy"])
     df = df.iloc[::-1].reset_index(drop=True)
     df["time"] = pd.to_datetime(df["ts"], unit='ms')
-    df[["o","h","l","c","vol"]] = df[["o","h","l","c","vol"]].astype(float)
-    df.rename(columns={"o":"open","h":"high","l":"low","c":"close","vol":"volume"}, inplace=True)
+    df = df.rename(columns={"o":"open","h":"high","l":"low","c":"close","vol":"volume"})
+    for col in ["open","high","low","close","volume"]:
+        df[col] = df[col].astype(float)
     return df
 
-# ===== Supertrend =====
 def supertrend(df, period=10, multiplier=3):
     hl2 = (df["high"] + df["low"]) / 2
     atr = ta.volatility.AverageTrueRange(df["high"], df["low"], df["close"], window=period).average_true_range()
@@ -39,24 +33,27 @@ def supertrend(df, period=10, multiplier=3):
     lowerband = hl2 - multiplier * atr
     supertrend = [True] * len(df)
     for i in range(1, len(df)):
-        if df["close"][i] > upperband[i-1]:
+        if df["close"].iloc[i] > upperband.iloc[i-1]:
             supertrend[i] = True
-        elif df["close"][i] < lowerband[i-1]:
+        elif df["close"].iloc[i] < lowerband.iloc[i-1]:
             supertrend[i] = False
         else:
             supertrend[i] = supertrend[i-1]
-            if supertrend[i] and lowerband[i] < lowerband[i-1]:
-                lowerband[i] = lowerband[i-1]
-            if not supertrend[i] and upperband[i] > upperband[i-1]:
-                upperband[i] = upperband[i-1]
+            if supertrend[i] and lowerband.iloc[i] < lowerband.iloc[i-1]:
+                lowerband.iloc[i] = lowerband.iloc[i-1]
+            if not supertrend[i] and upperband.iloc[i] > upperband.iloc[i-1]:
+                upperband.iloc[i] = upperband.iloc[i-1]
     return pd.Series(supertrend)
 
-# ===== Creazione dashboard =====
 for symbol in selected_cryptos:
     st.subheader(f"📈 {symbol}")
     df = get_okx_data(symbol, interval, limit)
+    
+    if len(df) < 30:
+        st.warning("Dati insufficienti per calcolare tutti gli indicatori. Prova a aumentare il numero di candele.")
+        continue
 
-    # Indicatori
+    # Calcolo indicatori
     df["RSI"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
     macd = ta.trend.MACD(df["close"])
     df["MACD"] = macd.macd()
@@ -69,16 +66,13 @@ for symbol in selected_cryptos:
     df["ADX"] = ta.trend.ADXIndicator(df["high"], df["low"], df["close"], window=14).adx()
     df["Supertrend"] = supertrend(df)
 
-    # Alert RSI
     if df["RSI"].iloc[-1] > 70:
         st.error(f"⚠️ {symbol} RSI > 70 (ipercomprato)")
     elif df["RSI"].iloc[-1] < 30:
         st.success(f"✅ {symbol} RSI < 30 (ipervenduto)")
 
-    # Tabs
     tab1, tab2, tab3 = st.tabs(["Grafico Prezzo", "Indicatori", "Download"])
 
-    # Grafico Prezzo
     with tab1:
         fig = go.Figure()
         fig.add_trace(go.Candlestick(x=df["time"], open=df["open"], high=df["high"], low=df["low"], close=df["close"], name="Prezzo"))
@@ -89,14 +83,12 @@ for symbol in selected_cryptos:
         fig.update_layout(template=theme, xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
 
-    # Indicatori (RSI, MACD, ADX)
     with tab2:
         st.write("### RSI & ADX")
         st.line_chart(df[["RSI","ADX"]])
         st.write("### MACD")
         st.line_chart(df[["MACD","MACD_signal"]])
 
-    # Download dati
     with tab3:
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button(f"Scarica dati {symbol}", data=csv, file_name=f"{symbol}_data.csv", mime="text/csv")
