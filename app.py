@@ -48,12 +48,12 @@ def supertrend(df, period=10, multiplier=3):
 for symbol in selected_cryptos:
     st.subheader(f"📈 {symbol}")
     df = get_okx_data(symbol, interval, limit)
-    
-    if len(df) < 30:
-        st.warning("Dati insufficienti per calcolare tutti gli indicatori. Prova a aumentare il numero di candele.")
-        continue
 
-    # Calcolo indicatori
+    if len(df) < 30:
+        st.warning(f"Dati insufficienti per {symbol}. Prova ad aumentare il numero di candele.")
+        continue  # passa al prossimo simbolo senza errori
+
+    # Calcolo indicatori solo se dati sufficienti
     df["RSI"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
     macd = ta.trend.MACD(df["close"])
     df["MACD"] = macd.macd()
@@ -85,10 +85,11 @@ for symbol in selected_cryptos:
 
     with tab2:
         st.write("### RSI & ADX")
-        st.line_chart(df[["RSI","ADX"]])
+        st.line_chart(df[["RSI", "ADX"]])
         st.write("### MACD")
-        st.line_chart(df[["MACD","MACD_signal"]])
+        st.line_chart(df[["MACD", "MACD_signal"]])
 
     with tab3:
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button(f"Scarica dati {symbol}", data=csv, file_name=f"{symbol}_data.csv", mime="text/csv")
+
